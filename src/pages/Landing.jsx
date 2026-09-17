@@ -55,11 +55,11 @@ function BrandMark({ size = 34 }) {
 }
 
 const NAV_LINKS = [
-  { href: "#features", label: "Features" },
-  { href: "#how", label: "How It Works" },
-  { href: "/login", label: "For Students" },
-  { href: "/login", label: "For Supervisors" },
-  { href: "#pricing", label: "Pricing" },
+  { href: "#features", label: "Features", hash: true },
+  { href: "#how", label: "How It Works", hash: true },
+  { href: "/login", label: "For Supervisors", hash: false },
+  { href: "/login", label: "For Company", hash: false },
+  { href: "#pricing", label: "Pricing", hash: true },
 ];
 
 function Header() {
@@ -74,6 +74,7 @@ function Header() {
     >
       <div className="max-w-[1180px] mx-auto px-7 md:px-10 flex items-center justify-between py-4">
         <Link
+          to="/"
           className="flex items-center gap-2.5 font-extrabold text-lg"
           style={{ color: COLORS.ink }}
         >
@@ -82,25 +83,35 @@ function Header() {
         </Link>
 
         <nav className="hidden lg:flex items-center gap-8">
-          {NAV_LINKS.map((l) => (
-            <Link
-              key={l.href}
-              to={l.href}
-              className="text-sm font-medium opacity-75 hover:opacity-100 transition"
-              style={{ color: COLORS.ink }}
-            >
-              {l.label}
-            </Link>
-          ))}
+          {NAV_LINKS.map((l) =>
+            l.hash ? (
+              <HashLink
+                key={l.href}
+                to={l.href}
+                className="text-sm font-medium opacity-75 hover:opacity-100 transition"
+                style={{ color: COLORS.ink }}
+              >
+                {l.label}
+              </HashLink>
+            ) : (
+              <Link
+                key={l.href}
+                to={l.href}
+                className="text-sm font-medium opacity-75 hover:opacity-100 transition"
+                style={{ color: COLORS.ink }}
+              >
+                {l.label}
+              </Link>
+            )
+          )}
         </nav>
 
         <div className="hidden lg:flex items-center gap-3">
           <Link
             to="/login"
             className="px-5 py-3 rounded-[10px] text-sm font-semibold border hover:border-[#2F6B3E] transition"
-            style={{ borderColor: COLORS.border, color: COLORS.ink }}
-          >
-            Supervisor Portal
+            style={{ borderColor: COLORS.border, color: COLORS.ink }} >
+            Student Portal
           </Link>
           <Link
             to="/login"
@@ -137,29 +148,39 @@ function Header() {
           className="lg:hidden max-w-[1180px] mx-auto px-7 pb-5 border-t flex flex-col gap-1"
           style={{ borderColor: COLORS.border }}
         >
-          {NAV_LINKS.map((l) => (
-            <Link
-              key={l.href}
-              to={l.href}
-              onClick={() => setOpen(false)}
-              className="py-3 text-[15px] font-medium"
-              style={{ color: COLORS.ink }}
-            >
-              {l.label}
-            </Link>
-          ))}
+          {NAV_LINKS.map((l) =>
+            l.hash ? (
+              <HashLink
+                key={l.href}
+                to={l.href}
+                onClick={() => setOpen(false)}
+                className="py-3 text-[15px] font-medium"
+                style={{ color: COLORS.ink }}
+              >
+                {l.label}
+              </HashLink>
+            ) : (
+              <Link
+                key={l.href}
+                to={l.href}
+                onClick={() => setOpen(false)}
+                className="py-3 text-[15px] font-medium"
+                style={{ color: COLORS.ink }}
+              >
+                {l.label}
+              </Link>
+            )
+          )}
           <Link
             to="/login"
             className="mt-2 text-center px-5 py-3 rounded-[10px] text-sm font-semibold text-white"
-            style={{ background: COLORS.green700 }}
-          >
+            style={{ background: COLORS.green700 }} >
             Get Started as a Student
           </Link>
           <Link
             to="/login"
             className="mt-2 text-center px-5 py-3 rounded-[10px] text-sm font-semibold border"
-            style={{ borderColor: COLORS.border, color: COLORS.ink }}
-          >
+            style={{ borderColor: COLORS.border, color: COLORS.ink }} >
             Supervisor Portal
           </Link>
         </div>
@@ -224,20 +245,20 @@ function Hero() {
             laptop.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 max-w-[340px] lg:max-w-none">
-            <a
-              href="/login  "
+            <Link
+              to="/login"
               className="text-center px-6 py-3.5 rounded-[10px] font-semibold text-sm hover:bg-[#EDEBE0] transition"
               style={{ background: "white", color: COLORS.green900 }}
             >
               Get Started as a Student
-            </a>
-            <a
-              href="/login"
+            </Link>
+            <Link
+              to="/login"
               className="text-center px-6 py-3.5 rounded-[10px] font-semibold text-sm border hover:bg-white/5 hover:border-white transition"
               style={{ borderColor: "rgba(255,255,255,0.32)", color: "white" }}
             >
               Supervisor Portal
-            </a>
+            </Link>
           </div>
         </div>
 
@@ -392,21 +413,17 @@ function ProblemSolution() {
   return (
     <section id="problem-solution" className="py-16 md:py-20 lg:py-24">
       <div className="max-w-[1180px] mx-auto px-7 md:px-10">
-        <div
-          className="grid grid-cols-1 md:grid-cols-2 rounded-[20px] overflow-hidden border"
-          style={{ borderColor: COLORS.border }}
-        >
+        <div className="grid grid-cols-1 md:grid-cols-2 rounded-[20px] overflow-hidden border"
+          style={{ borderColor: COLORS.border }} >
           <div className="p-8 md:p-10" style={{ background: "#FBF3EE" }}>
             <span
               className="block mb-2.5 text-[12.5px] font-medium uppercase tracking-widest"
-              style={{ color: COLORS.orange, fontFamily: "monospace" }}
-            >
+              style={{ color: COLORS.orange, fontFamily: "monospace" }} >
               The Problem
             </span>
             <h3
               className="text-2xl font-extrabold mb-6 leading-tight"
-              style={{ color: COLORS.ink }}
-            >
+              style={{ color: COLORS.ink }} >
               Still juggling paper logbooks?
             </h3>
             <ul className="flex flex-col gap-4">
@@ -414,19 +431,16 @@ function ProblemSolution() {
                 <li
                   key={text}
                   className="flex gap-3 text-[15px] leading-relaxed"
-                  style={{ color: "#4A4038" }}
-                >
+                  style={{ color: "#4A4038" }} >
                   <span
                     className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5"
-                    style={{ background: "#F5DDD1", color: COLORS.orange }}
-                  >
+                    style={{ background: "#F5DDD1", color: COLORS.orange }} >
                     <svg viewBox="0 0 24 24" fill="none" width="11" height="11">
                       <path
                         d="M6 6l12 12M18 6L6 18"
                         stroke="currentColor"
                         strokeWidth="2.4"
-                        strokeLinecap="round"
-                      />
+                        strokeLinecap="round" />
                     </svg>
                   </span>
                   {text}
@@ -453,34 +467,30 @@ function ProblemSolution() {
                 <li
                   key={text}
                   className="flex gap-3 text-[15px] leading-relaxed"
-                  style={{ color: "rgba(255,255,255,0.82)" }}
-                >
+                  style={{ color: "rgba(255,255,255,0.82)" }} >
                   <span
                     className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5"
                     style={{
                       background: "rgba(140,223,158,0.16)",
                       color: "#8CDF9E",
-                    }}
-                  >
+                    }} >
                     <svg viewBox="0 0 24 24" fill="none" width="11" height="11">
                       <path
                         d="M5 13l4 4L19 7"
                         stroke="currentColor"
                         strokeWidth="2.4"
                         strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
+                        strokeLinejoin="round" />
                     </svg>
                   </span>
                   {text}
                 </li>
               ))}
             </ul>
-            <a
+              <a
               href="#how"
               className="mt-6 inline-flex items-center gap-1.5 font-bold text-[15px]"
-              style={{ color: "#8CDF9E" }}
-            >
+              style={{ color: "#8CDF9E" }} >
               Start logging digitally →
             </a>
           </div>
@@ -1011,7 +1021,7 @@ function CTA() {
               >
                 Sign Up Free
               </Link>
-              <Link
+              <HashLink
                 to="#features"
                 className="px-6 py-3.5 rounded-[10px] font-semibold text-sm border hover:bg-white/5 hover:border-white transition"
                 style={{
@@ -1020,7 +1030,7 @@ function CTA() {
                 }}
               >
                 Learn More
-              </Link>
+              </HashLink>
             </div>
           </div>
         </div>

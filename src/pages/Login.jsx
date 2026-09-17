@@ -12,7 +12,7 @@ const ROLE_META = {
 }
 
 export default function Login() {
-  const { login, signup, getStudentProfile } = useApp()
+  const { login, signup } = useApp()
   const navigate = useNavigate()
   const [role, setRole] = useState('student')
   const [mode, setMode] = useState('login')
@@ -30,14 +30,15 @@ export default function Login() {
     setForm((f) => ({ ...f, [field]: val }))
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     setError('')
 
     if (mode === 'login') {
-      const res = login({ role, email: form.email, password: form.password })
+      const res = await login({ email: form.email, password: form.password })
       if (!res.ok) return setError(res.error)
-      routeAfterAuth(res.id)
+      if (res.role !== role) return setError('Invalid email or password')
+      routeAfterAuth(res)
       return
     }
 
@@ -45,18 +46,15 @@ export default function Login() {
     if (role === 'company' && !form.companyName.trim()) return setError('Company name is required.')
     if (role === 'supervisor' && (!form.school || !form.department)) return setError('School and department are required.')
 
-    const res = signup({ role, ...form })
+    const res = await signup({ role, ...form })
     if (!res.ok) return setError(res.error)
-    routeAfterAuth(res.id)
+    routeAfterAuth(res)
   }
 
-  function routeAfterAuth(userId) {
-    if (role === 'supervisor') navigate('/supervisor')
-    else if (role === 'company') navigate('/company')
-    else {
-      const profile = getStudentProfile(userId)
-      navigate(profile?.confirmed ? '/student' : '/onboarding')
-    }
+  function routeAfterAuth(res) {
+    if (res.role === 'supervisor') navigate('/supervisor')
+    else if (res.role === 'company') navigate('/company')
+    else navigate(res.profile?.confirmed ? '/student' : '/onboarding')
   }
 
   return (

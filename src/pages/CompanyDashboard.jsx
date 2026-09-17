@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Building2,
   Users,
@@ -8,6 +8,9 @@ import {
   ChevronRight,
   ArrowLeft,
   CalendarDays,
+  Check,
+  X,
+  UserPlus,
 } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import Navbar from '../components/Navbar'
@@ -19,16 +22,72 @@ export default function CompanyDashboard() {
     getStudentsForCompany,
     getPendingDaySubmissionsForCompany,
     approveDay,
+    getPendingCompanyRequestsForCompany,
+    respondCompanyRequest,
   } = useApp()
+  const [loading, setLoading] = useState(true)
+  const [students, setStudents] = useState([])
+  const [pending, setPending] = useState([])
+  const [requests, setRequests] = useState([])
+  const [respondingId, setRespondingId] = useState(null)
+  const [error, setError] = useState('')
   const [openStudent, setOpenStudent] = useState(null)
 
-  const students = getStudentsForCompany(currentUser.id)
-  const pending = getPendingDaySubmissionsForCompany(currentUser.id)
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  async function loadData() {
+    try {
+      const [fetchedStudents, fetchedPending, fetchedRequests] = await Promise.all([
+        getStudentsForCompany(),
+        getPendingDaySubmissionsForCompany(),
+        getPendingCompanyRequestsForCompany(),
+      ])
+      setStudents(fetchedStudents)
+      setPending(fetchedPending)
+      setRequests(fetchedRequests)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleApprove(studentId, monthId, weekId, dayId) {
+    try {
+      await approveDay(studentId, monthId, weekId, dayId)
+      await loadData()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleRespondRequest(requestId, accept) {
+    setRespondingId(requestId)
+    try {
+      await respondCompanyRequest(requestId, accept)
+      await loadData() // accepting moves a student from requests into the students list
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRespondingId(null)
+    }
+  }
 
   const openRecord = useMemo(
     () => students.find((student) => student.studentId === openStudent),
     [students, openStudent]
   )
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-ink-50">
+        <Navbar />
+        <p className="text-center text-ink-500 mt-20">Loading your dashboard…</p>
+      </div>
+    )
+  }
 
   if (openRecord) {
     return (
@@ -36,7 +95,7 @@ export default function CompanyDashboard() {
         record={openRecord}
         onBack={() => setOpenStudent(null)}
         onApprove={(monthId, weekId, dayId) =>
-          approveDay(currentUser.id, openRecord.studentId, monthId, weekId, dayId)
+          handleApprove(openRecord.studentId, monthId, weekId, dayId)
         }
       />
     )
@@ -59,6 +118,62 @@ export default function CompanyDashboard() {
           </p>
         </div>
 
+        {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <UserPlus size={16} className="text-clay-600" />
+            <h2 className="text-sm font-semibold text-ink-700 uppercase tracking-wide">
+              Student requests {requests.length > 0 && `(${requests.length})`}
+            </h2>
+          </div>
+
+          {requests.length === 0 ? (
+            <Card className="p-5 text-sm text-ink-400">
+              No students have requested to join your organisation yet.
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {requests.map((req) => (
+                <Card key={req._id} className="p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="font-medium text-ink-900 text-sm">
+                        {req.profile?.fullname || req.studentId?.name || 'Unnamed student'}
+                      </p>
+                      <p className="text-xs text-ink-500 mt-0.5">
+                        {req.profile?.department} · {req.profile?.level} · Matric: {req.profile?.matricnumber}
+                      </p>
+                      <p className="text-xs text-ink-400 mt-1">
+                        Staff contact: {req.staffName} ({req.staffPhone})
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <Button
+                        variant="danger"
+                        className="!p-2"
+                        disabled={respondingId === req._id}
+                        onClick={() => handleRespondRequest(req._id, false)}
+                        title="Decline"
+                      >
+                        <X size={16} />
+                      </Button>
+                      <Button
+                        className="!p-2"
+                        disabled={respondingId === req._id}
+                        onClick={() => handleRespondRequest(req._id, true)}
+                        title="Accept"
+                      >
+                        <Check size={16} />
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </section>
+
         <section>
           <div className="flex items-center gap-2 mb-3">
             <Inbox size={16} className="text-clay-600" />
@@ -77,10 +192,10 @@ export default function CompanyDashboard() {
           ) : (
             <div className="space-y-3">
               {pending.map((item) => (
-                <Card key={`${item.studentId}-${item.month.id}-${item.week.id}-${item.day.id}`} className="p-4">
+                <Card key={`${item.studentId}-${item.month._id}-${item.week._id}-${item.day._id}`} className="p-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="min-w-0">
-                      <p className="font-medium text-ink-900 text-sm">{item.profile?.fullName}</p>
+                      <p className="font-medium text-ink-900 text-sm">{item.profile?.fullname}</p>
                       <p className="text-xs text-ink-500 mt-0.5">
                         {item.profile?.department} · {item.profile?.level}
                       </p>
@@ -90,7 +205,7 @@ export default function CompanyDashboard() {
                       <p className="text-sm text-ink-700 mt-2">{item.day.text}</p>
                     </div>
                     <Button
-                      onClick={() => approveDay(currentUser.id, item.studentId, item.month.id, item.week.id, item.day.id)}
+                      onClick={() => handleApprove(item.studentId, item.month._id, item.week._id, item.day._id)}
                       className="flex items-center justify-center gap-2 shrink-0"
                     >
                       <CheckCircle2 size={15} /> Approve day
@@ -131,9 +246,9 @@ export default function CompanyDashboard() {
                     <Card className="p-4 hover:border-forest-300 transition-colors">
                       <div className="flex items-center justify-between gap-4">
                         <div>
-                          <p className="font-medium text-ink-900 text-sm">{student.profile?.fullName}</p>
+                          <p className="font-medium text-ink-900 text-sm">{student.profile?.fullname}</p>
                           <p className="text-xs text-ink-500 mt-0.5">
-                            {student.profile?.matricNumber} · {student.profile?.department}
+                            {student.profile?.matricnumber} · {student.profile?.department}
                           </p>
                         </div>
                         <div className="flex items-center gap-3">
@@ -170,27 +285,28 @@ function StudentRecord({ record, onBack, onApprove }) {
     <div className="min-h-screen bg-ink-50">
       <Navbar />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
-        <button
+        <Button
+          variant="ghost"
           onClick={onBack}
-          className="flex items-center gap-1.5 text-sm text-ink-500 hover:text-ink-800 mb-6"
+          className="flex items-center gap-1.5 mb-6 !px-2"
         >
           <ArrowLeft size={15} /> Back to company dashboard
-        </button>
+        </Button>
 
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-2">
             <Building2 size={17} className="text-trust-600" />
             <span className="text-xs font-semibold text-trust-700 uppercase tracking-wide">Company record</span>
           </div>
-          <h1 className="font-display text-2xl font-semibold text-ink-900">{profile?.fullName}</h1>
+          <h1 className="font-display text-2xl font-semibold text-ink-900">{profile?.fullname}</h1>
           <p className="text-ink-500 text-sm mt-1">
-            {profile?.matricNumber} · {profile?.department} · {profile?.level}
+            {profile?.matricnumber} · {profile?.department} · {profile?.level}
           </p>
         </div>
 
         <div className="space-y-4">
           {logbook?.months.map((month) => (
-            <Card key={month.id} className="p-5">
+            <Card key={month._id} className="p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <CalendarDays size={16} className="text-ink-400" />
@@ -205,11 +321,11 @@ function StudentRecord({ record, onBack, onApprove }) {
 
               <div className="space-y-5">
                 {month.weeks.map((week) => (
-                  <div key={week.id}>
+                  <div key={week._id}>
                     <p className="text-xs font-semibold text-ink-500 mb-2">{week.label}</p>
                     <div className="space-y-2">
                       {week.days.map((day) => (
-                        <div key={day.id} className="rounded-xl border border-ink-100 p-3">
+                        <div key={day._id} className="rounded-xl border border-ink-100 p-3">
                           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 mb-1">
@@ -229,7 +345,7 @@ function StudentRecord({ record, onBack, onApprove }) {
 
                             {day.submitted && !day.approved && !month.locked && (
                               <Button
-                                onClick={() => onApprove(month.id, week.id, day.id)}
+                                onClick={() => onApprove(month._id, week._id, day._id)}
                                 className="flex items-center justify-center gap-2 shrink-0"
                               >
                                 <CheckCircle2 size={14} /> Approve

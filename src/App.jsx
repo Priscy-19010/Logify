@@ -8,16 +8,19 @@ import StudentDashboard from "./pages/StudentDashboard";
 import SupervisorDashboard from "./pages/SupervisorDashboard";
 import CompanyDashboard from "./pages/CompanyDashboard";
 import Landing from "./pages/Landing";
+import CompanyMatch from "./pages/CompanyMatch";
 
 function RequireAuth({ role, children }) {
-  const { currentUser } = useApp();
+  const { currentUser, authLoading } = useApp();
+  if (authLoading) return null; 
   if (!currentUser) return <Navigate to="/login" replace />;
   if (role && currentUser.role !== role) return <Navigate to="/login" replace />;
   return children;
 }
 
 function Root() {
-  const { currentUser } = useApp();
+  const { currentUser, authLoading } = useApp();
+  if (authLoading) return null;
   if (!currentUser) return <Navigate to="/login" replace />;
   const routes = { student: "/student", supervisor: "/supervisor", company: "/company" };
   return <Navigate to={routes[currentUser.role] || "/login"} replace />;
@@ -36,6 +39,7 @@ export default function App() {
           <Route path="/supervisor" element={<RequireAuth role="supervisor"><SupervisorDashboard /></RequireAuth>} />
           <Route path="/company" element={<RequireAuth role="company"><CompanyDashboard /></RequireAuth>} />
           <Route path="*" element={<Root />} />
+          <Route path="/company-match" element={<RequireAuth role="student"><CompanyMatch /></RequireAuth>} />
         </Routes>
       </BrowserRouter>
     </AppProvider>

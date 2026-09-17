@@ -1,7 +1,7 @@
-import React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BookOpenCheck, LogOut } from 'lucide-react'
 import { useApp } from '../context/AppContext'
+import ProfileMenu from './ProfileMenu'
 
 export default function Navbar() {
   const { currentUser, logout } = useApp()
@@ -22,11 +22,8 @@ export default function Navbar() {
           <span className="font-display font-semibold text-lg text-ink-900">Logify</span>
         </div>
         {currentUser && (
-          <div className="flex items-center gap-3">
-            <div className="text-right hidden sm:block">
-              <p className="text-sm font-medium text-ink-800 leading-tight">{currentUser.name}</p>
-              <p className="text-xs text-ink-400 capitalize leading-tight">{currentUser.role}</p>
-            </div>
+          <div className="flex items-center gap-2">
+            <ProfileMenu />
             <button
               onClick={handleLogout}
               className="w-9 h-9 rounded-lg hover:bg-ink-100 flex items-center justify-center text-ink-500"

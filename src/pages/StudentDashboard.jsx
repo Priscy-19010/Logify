@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useEffect, useState } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import { CalendarDays, Lock, Send, CheckCircle2, Building2, Clock3 } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import Navbar from '../components/Navbar'
@@ -7,7 +7,6 @@ import { Button, Card, Badge, Field, Input, Textarea, ProgressBar } from '../com
 
 export default function StudentDashboard() {
   const {
-    currentUser,
     getStudentProfile,
     getSupervisorForStudent,
     getLogbook,
@@ -16,14 +15,82 @@ export default function StudentDashboard() {
     submitMonth,
   } = useApp()
   const navigate = useNavigate()
-  const profile = getStudentProfile(currentUser.id)
-  const supervisor = getSupervisorForStudent(currentUser.id)
-  const logbook = getLogbook(currentUser.id)
+  const [loading, setLoading] = useState(true)
+  const [profile, setProfile] = useState(null)
+  const [supervisor, setSupervisor] = useState(null)
+  const [logbook, setLogbook] = useState(null)
   const [secondEmail, setSecondEmail] = useState('')
   const [submitMsg, setSubmitMsg] = useState('')
+  const [error, setError] = useState('')
 
-  if (!profile) { navigate('/onboarding'); return null }
-  if (!supervisor) { navigate('/match'); return null }
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  async function loadData() {
+    try {
+      const [fetchedProfile, fetchedSupervisor] = await Promise.all([
+        getStudentProfile(),
+        getSupervisorForStudent(),
+      ])
+
+      if (!fetchedProfile) { navigate('/onboarding'); return }
+      if (!fetchedSupervisor) { navigate('/match'); return }
+
+      setProfile(fetchedProfile)
+      setSupervisor(fetchedSupervisor)
+
+      const fetchedLogbook = await getLogbook()
+      setLogbook(fetchedLogbook)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function refreshLogbook() {
+    const fresh = await getLogbook()
+    setLogbook(fresh)
+  }
+
+  async function handleSaveDay(monthId, weekId, dayId, text) {
+    try {
+      await updateDayEntry(monthId, weekId, dayId, text)
+      await refreshLogbook()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleSubmitDay(monthId, weekId, dayId) {
+    try {
+      await submitDay(monthId, weekId, dayId)
+      await refreshLogbook()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleSubmitMonth() {
+    try {
+      await submitMonth(currentMonth._id, secondEmail.trim() || null)
+      setSubmitMsg('Monthly report submitted.')
+      setSecondEmail('')
+      await refreshLogbook()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-ink-50">
+        <Navbar />
+        <p className="text-center text-ink-500 mt-20">Loading your dashboard…</p>
+      </div>
+    )
+  }
 
   if (!logbook) {
     return (
@@ -40,13 +107,7 @@ export default function StudentDashboard() {
   const totalDays = currentMonth.weeks.reduce((acc, w) => acc + w.days.length, 0)
   const approvedDays = currentMonth.weeks.reduce((acc, w) => acc + w.days.filter((d) => d.approved).length, 0)
   const pendingDays = currentMonth.weeks.reduce((acc, w) => acc + w.days.filter((d) => d.submitted && !d.approved).length, 0)
-  const allDaysApproved = approvedDays === totalDays
-
-  function handleSubmitMonth() {
-    submitMonth(currentUser.id, currentMonth.id, secondEmail.trim() || null)
-    setSubmitMsg('Monthly report submitted.')
-    setSecondEmail('')
-  }
+  const allDaysApproved = totalDays > 0 && approvedDays === totalDays
 
   return (
     <div className="min-h-screen bg-ink-50">
@@ -64,6 +125,8 @@ export default function StudentDashboard() {
           </Badge>
         </div>
 
+        {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
+
         <Card className="p-5">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm font-medium text-ink-700">Company approval progress</p>
@@ -80,10 +143,10 @@ export default function StudentDashboard() {
         <div className="space-y-5">
           {currentMonth.weeks.map((week) => (
             <WeekCard
-              key={week.id}
+              key={week._id}
               week={week}
-              onChangeDay={(dayId, text) => updateDayEntry(currentUser.id, currentMonth.id, week.id, dayId, text)}
-              onSubmitDay={(dayId) => submitDay(currentUser.id, currentMonth.id, week.id, dayId)}
+              onSaveDay={(dayId, text) => handleSaveDay(currentMonth._id, week._id, dayId, text)}
+              onSubmitDay={(dayId) => handleSubmitDay(currentMonth._id, week._id, dayId)}
               locked={currentMonth.locked}
             />
           ))}
@@ -105,7 +168,7 @@ export default function StudentDashboard() {
                 onChange={(e) => setSecondEmail(e.target.value)}
               />
             </Field>
-            <Button className="mt-4 flex items-center gap-2" onClick={handleSubmitMonth} disabled={!allDaysApproved}>
+            <Button variant="accent" className="mt-4 flex items-center gap-2" onClick={handleSubmitMonth} disabled={!allDaysApproved}>
               <Send size={15} /> Submit to {supervisor.name.split(' ')[0]}
             </Button>
             {submitMsg && (
@@ -121,10 +184,19 @@ export default function StudentDashboard() {
             <Building2 size={16} className="text-trust-600" />
             <p className="text-sm font-semibold text-ink-800">IT placement details</p>
           </div>
-          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-            <div><dt className="text-ink-400 text-xs">Organisation</dt><dd className="text-ink-800">{profile.orgName}</dd></div>
-            <div><dt className="text-ink-400 text-xs">Staff contact</dt><dd className="text-ink-800">{profile.staffName} · {profile.staffPhone}</dd></div>
-          </dl>
+          {profile.companyId ? (
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div><dt className="text-ink-400 text-xs">Organisation</dt><dd className="text-ink-800">{profile.companyName}</dd></div>
+              <div><dt className="text-ink-400 text-xs">Staff contact</dt><dd className="text-ink-800">{profile.staffName} · {profile.staffPhone}</dd></div>
+            </dl>
+          ) : (
+            <div className="text-sm">
+              <p className="text-ink-500 mb-3">You're not connected to a company yet.</p>
+              <Link to="/company-match" className="inline-block px-4 py-2.5 rounded-xl bg-forest-600 hover:bg-forest-700 text-white font-medium text-sm">
+                Find your company
+              </Link>
+            </div>
+          )}
         </Card>
 
         {history.length > 0 && (
@@ -132,7 +204,7 @@ export default function StudentDashboard() {
             <p className="text-sm font-semibold text-ink-800 mb-3">Submitted months</p>
             <div className="space-y-2">
               {history.map((m) => (
-                <div key={m.id} className="flex items-center justify-between py-2 border-b border-ink-50 last:border-0">
+                <div key={m._id} className="flex items-center justify-between py-2 border-b border-ink-50 last:border-0">
                   <span className="text-sm text-ink-700">{m.label}</span>
                   <span className="flex items-center gap-1.5 text-xs text-ink-400"><Lock size={12} /> Locked</span>
                 </div>
@@ -145,7 +217,7 @@ export default function StudentDashboard() {
   )
 }
 
-function WeekCard({ week, onChangeDay, onSubmitDay, locked }) {
+function WeekCard({ week, onSaveDay, onSubmitDay, locked }) {
   const [open, setOpen] = useState(!week.weekDone)
   const approvedCount = week.days.filter((d) => d.approved).length
 
@@ -163,38 +235,58 @@ function WeekCard({ week, onChangeDay, onSubmitDay, locked }) {
 
       {open && (
         <div className="mt-4 space-y-4">
-          {week.days.map((day) => {
-            const status = day.approved ? 'approved' : day.submitted ? 'pending' : day.filled ? 'ready' : 'empty'
-            return (
-              <div key={day.id} className="border-b border-ink-100 last:border-0 pb-4 last:pb-0">
-                <div className="flex items-center justify-between gap-3 mb-1.5">
-                  <p className="text-xs font-medium text-ink-500">{day.label}</p>
-                  {status === 'approved' && <Badge tone="forest"><CheckCircle2 size={11} className="mr-1" /> Approved</Badge>}
-                  {status === 'pending' && <Badge tone="clay"><Clock3 size={11} className="mr-1" /> Awaiting approval</Badge>}
-                  {status === 'ready' && <Badge tone="trust">Ready to send</Badge>}
-                </div>
-                <Textarea
-                  rows={2}
-                  value={day.text}
-                  disabled={locked || day.submitted || day.approved}
-                  onChange={(e) => onChangeDay(day.id, e.target.value)}
-                  placeholder="What did you work on today?"
-                />
-                {!locked && !day.submitted && !day.approved && (
-                  <Button
-                    variant="secondary"
-                    onClick={() => onSubmitDay(day.id)}
-                    disabled={!day.filled}
-                    className="mt-2 flex items-center gap-2"
-                  >
-                    <Send size={14} /> Send to company supervisor
-                  </Button>
-                )}
-              </div>
-            )
-          })}
+          {week.days.map((day) => (
+            <DayEntry
+              key={day._id}
+              day={day}
+              locked={locked}
+              onSave={(text) => onSaveDay(day._id, text)}
+              onSubmit={() => onSubmitDay(day._id)}
+            />
+          ))}
         </div>
       )}
     </Card>
+  )
+}
+
+function DayEntry({ day, locked, onSave, onSubmit }) {
+  const [text, setText] = useState(day.text || '')
+  const status = day.approved ? 'approved' : day.submitted ? 'pending' : day.filled ? 'ready' : 'empty'
+  const disabled = locked || day.submitted || day.approved
+
+  function handleBlur() {
+    if (!disabled && text !== day.text) {
+      onSave(text)
+    }
+  }
+
+  return (
+    <div className="border-b border-ink-100 last:border-0 pb-4 last:pb-0">
+      <div className="flex items-center justify-between gap-3 mb-1.5">
+        <p className="text-xs font-medium text-ink-500">{day.label}</p>
+        {status === 'approved' && <Badge tone="forest"><CheckCircle2 size={11} className="mr-1" /> Approved</Badge>}
+        {status === 'pending' && <Badge tone="clay"><Clock3 size={11} className="mr-1" /> Awaiting approval</Badge>}
+        {status === 'ready' && <Badge tone="trust">Ready to send</Badge>}
+      </div>
+      <Textarea
+        rows={2}
+        value={text}
+        disabled={disabled}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={handleBlur}
+        placeholder="What did you work on today?"
+      />
+      {!disabled && (
+        <Button
+          variant="secondary"
+          onClick={() => { handleBlur(); onSubmit() }}
+          disabled={!text.trim()}
+          className="mt-2 flex items-center gap-2"
+        >
+          <Send size={14} /> Send to company supervisor
+        </Button>
+      )}
+    </div>
   )
 }

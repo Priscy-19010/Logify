@@ -1,353 +1,259 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
-import { loadState, saveState, getInitialState, uid, buildLogbook } from '../data/store'
-import { SEED_SUPERVISORS, SEED_COMPANIES } from '../data/seed'
+import { apiRequest, getToken, setToken } from '../api/client'
 
 const AppContext = createContext(null)
 
-const sameCompany = (a, b) =>
-  String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
-
 export function AppProvider({ children }) {
-  const [state, setState] = useState(() => {
-    const loaded = loadState()
-    if (loaded) {
-      return {
-        ...loaded,
-        companies: loaded.companies?.length ? loaded.companies : SEED_COMPANIES.map((c) => ({ ...c })),
+  const [currentUser, setCurrentUser] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+
+  // On first load, if a token is saved, ask the backend who it belongs to.
+  useEffect(() => {
+    async function restoreSession() {
+      const token = getToken()
+      if (!token) {
+        setAuthLoading(false)
+        return
+      }
+      try {
+        const user = await apiRequest('/auth/me')
+        setCurrentUser(user)
+      } catch {
+        setToken(null) // token was invalid/expired
+      } finally {
+        setAuthLoading(false)
       }
     }
-    const init = getInitialState()
-    init.supervisors = SEED_SUPERVISORS.map((s) => ({ ...s }))
-    init.companies = SEED_COMPANIES.map((c) => ({ ...c }))
-    return init
-  })
-
-  useEffect(() => { saveState(state) }, [state])
+    restoreSession()
+  }, [])
 
   // ---- Auth ----
-  function signup({ role, name, email, password, school, department, companyName }) {
-    const normalizedEmail = email.trim().toLowerCase()
-    const existingUser = state.users.find((u) => u.email.toLowerCase() === normalizedEmail)
-    const existingSupervisor = state.supervisors.find((s) => s.email.toLowerCase() === normalizedEmail)
-    const existingCompany = state.companies.find((c) => c.email.toLowerCase() === normalizedEmail)
-    if (existingUser || existingSupervisor || existingCompany) {
-      return { ok: false, error: 'An account with this email already exists.' }
+  async function signup({ role, name, email, password, school, department, companyName }) {
+    try {
+      const payload = {
+        role,
+        // Company signup collects a separate "companyName" field in the form,
+        // but the backend User model only has `name` — no companyName field.
+        // So for a company account, `name` on the User IS the company name.
+        name: role === 'company' ? companyName : name,
+        email,
+        password,
+        school,
+        department,
+      }
+      const res = await apiRequest('/auth/signup', { method: 'POST', body: payload })
+      setToken(res.token)
+      const user = { id: res.id, role: res.role, name: res.name, email: res.email, school: res.school, department: res.department }
+      setCurrentUser(user)
+
+      // If they're a student, fetch their profile now so the caller can decide
+      // whether to route to onboarding or straight to the dashboard.
+      let profile = null
+      if (res.role === 'student') {
+        profile = await getStudentProfile().catch(() => null)
+      }
+
+      return { ok: true, id: res.id, role: res.role, profile }
+    } catch (error) {
+      return { ok: false, error: error.message }
     }
-
-    const id = uid(role === 'student' ? 'stu' : role === 'company' ? 'company' : 'sup')
-    const user = { id, role, name, email: normalizedEmail, password }
-
-    setState((s) => {
-      const next = { ...s, users: [...s.users, user], currentUserId: id }
-      if (role === 'supervisor') {
-        next.supervisors = [...s.supervisors, { id, name, email: normalizedEmail, school, department, password }]
-      }
-      if (role === 'company') {
-        next.companies = [...(s.companies || []), {
-          id,
-          name: companyName.trim(),
-          email: normalizedEmail,
-          password,
-        }]
-      }
-      return next
-    })
-    return { ok: true, id }
   }
 
-  function login({ role, email, password }) {
-    const normalizedEmail = email.trim().toLowerCase()
-    if (role === 'student') {
-      const user = state.users.find((u) =>
-        u.email.toLowerCase() === normalizedEmail && u.password === password && u.role === 'student'
-      )
-      if (!user) return { ok: false, error: 'No matching student account. Check your details or sign up.' }
-      setState((s) => ({ ...s, currentUserId: user.id }))
-      return { ok: true, id: user.id }
-    }
+  async function login({ email, password }) {
+    try {
+      const res = await apiRequest('/auth/login', { method: 'POST', body: { email, password } })
+      setToken(res.token)
+      const user = { id: res.id, role: res.role, name: res.name, email: res.email, school: res.school, department: res.department }
+      setCurrentUser(user)
 
-    if (role === 'supervisor') {
-      const seeded = state.supervisors.find((sv) => sv.email.toLowerCase() === normalizedEmail && sv.password === password)
-      if (!seeded) return { ok: false, error: 'No matching university supervisor account. Check your details or sign up.' }
-      setState((s) => ({ ...s, currentUserId: seeded.id }))
-      return { ok: true, id: seeded.id }
-    }
+      let profile = null
+      if (res.role === 'student') {
+        profile = await getStudentProfile().catch(() => null)
+      }
 
-    const company = (state.companies || []).find((c) =>
-      c.email.toLowerCase() === normalizedEmail && c.password === password
-    )
-    if (!company) return { ok: false, error: 'No matching company account. Check your details or sign up.' }
-    setState((s) => ({ ...s, currentUserId: company.id }))
-    return { ok: true, id: company.id }
+      return { ok: true, id: res.id, role: res.role, profile }
+    } catch (error) {
+      return { ok: false, error: error.message }
+    }
   }
 
   function logout() {
-    setState((s) => ({ ...s, currentUserId: null }))
+    setToken(null)
+    setCurrentUser(null)
   }
-
-  const currentUser = (() => {
-    if (!state.currentUserId) return null
-    const company = (state.companies || []).find((x) => x.id === state.currentUserId)
-    if (company) return { ...company, role: 'company' }
-    const sup = state.supervisors.find((x) => x.id === state.currentUserId)
-    if (sup) return { ...sup, role: 'supervisor' }
-    const u = state.users.find((x) => x.id === state.currentUserId)
-    return u || null
-  })()
 
   // ---- Student profile ----
-  function saveStudentProfile(userId, profile) {
-    setState((s) => ({
-      ...s,
-      studentProfiles: {
-        ...s.studentProfiles,
-        [userId]: { ...(s.studentProfiles[userId] || {}), ...profile },
-      },
-    }))
+  async function saveStudentProfile(profile) {
+    return apiRequest('/student/profile', { method: 'POST', body: profile })
   }
 
-  function getStudentProfile(userId) {
-    return state.studentProfiles[userId] || null
+  async function getStudentProfile() {
+    try {
+      return await apiRequest('/student/profile')
+    } catch (error) {
+      if (error.status === 404) return null
+      throw error
+    }
   }
 
   // ---- Join requests ----
-  function sendJoinRequest(studentId, supervisorId) {
-    setState((s) => {
-      const already = s.joinRequests.find((r) => r.studentId === studentId && r.status !== 'declined')
-      if (already) return s
-      const req = { id: uid('req'), studentId, supervisorId, status: 'pending', createdAt: new Date().toISOString() }
-      return { ...s, joinRequests: [...s.joinRequests, req] }
+  async function sendJoinRequest(supervisorId) {
+    return apiRequest('/student/join-request', { method: 'POST', body: { supervisorId } })
+  }
+
+  async function respondJoinRequest(requestId, accept) {
+    return apiRequest(`/supervisor/requests/${requestId}`, {
+      method: 'PATCH',
+      body: { decision: accept ? 'accepted' : 'declined' },
     })
   }
 
-  function respondJoinRequest(requestId, accept) {
-    setState((s) => {
-      const joinRequests = s.joinRequests.map((r) =>
-        r.id === requestId ? { ...r, status: accept ? 'accepted' : 'declined' } : r
-      )
-      let logbooks = s.logbooks
-      if (accept) {
-        const req = s.joinRequests.find((r) => r.id === requestId)
-        if (req && !logbooks[req.studentId]) {
-          logbooks = { ...logbooks, [req.studentId]: buildLogbook(4) }
-        }
-      }
-      return { ...s, joinRequests, logbooks }
-    })
+  async function getJoinRequestForStudent() {
+    try {
+      return await apiRequest('/student/join-request')
+    } catch (error) {
+      if (error.status === 404) return null
+      throw error
+    }
   }
 
-  function getJoinRequestForStudent(studentId) {
-    return state.joinRequests.find((r) => r.studentId === studentId) || null
+  // Derived from the (now supervisorId-populated) join request — see the
+  // backend fix needed in studentController.js for this to return a real name/email.
+  async function getSupervisorForStudent() {
+    const request = await getJoinRequestForStudent()
+    if (!request || request.status !== 'accepted') return null
+    return request.supervisorId // populated object: { _id, name, email }
   }
 
-  function getSupervisorForStudent(studentId) {
-    const req = state.joinRequests.find((r) => r.studentId === studentId && r.status === 'accepted')
-    if (!req) return null
-    return state.supervisors.find((s) => s.id === req.supervisorId) || null
+  async function getStudentsForSupervisor() {
+    return apiRequest('/supervisor/students')
   }
 
-  function getStudentsForSupervisor(supervisorId) {
-    return state.joinRequests
-      .filter((r) => r.supervisorId === supervisorId && r.status === 'accepted')
-      .map((r) => ({
-        studentId: r.studentId,
-        profile: state.studentProfiles[r.studentId],
-        logbook: state.logbooks[r.studentId],
-      }))
+  async function getPendingRequestsForSupervisor() {
+    return apiRequest('/supervisor/requests/pending')
   }
 
-  function getPendingRequestsForSupervisor(supervisorId) {
-    return state.joinRequests
-      .filter((r) => r.supervisorId === supervisorId && r.status === 'pending')
-      .map((r) => ({ ...r, profile: state.studentProfiles[r.studentId] }))
+  async function suggestSupervisors(school, department) {
+    const params = new URLSearchParams()
+    if (school) params.set('school', school)
+    if (department) params.set('department', department)
+    return apiRequest(`/supervisor/suggest?${params.toString()}`)
   }
 
-  function suggestSupervisors(school, department) {
-    return state.supervisors.filter((sv) => sv.school === school && sv.department === department)
+  async function listCompanies() {
+    return apiRequest('/company/list')
   }
 
   // ---- Company access ----
-  // A company can only retrieve profiles whose IT placement organisation matches
-  // the company's registered organisation name.
-  function getStudentsForCompany(companyId) {
-    const company = (state.companies || []).find((c) => c.id === companyId)
-    if (!company) return []
-    return Object.entries(state.studentProfiles)
-      .filter(([, profile]) =>
-        profile.companyId ? profile.companyId === companyId : sameCompany(profile.orgName, company.name)
-      )
-      .map(([studentId, profile]) => ({
-        studentId,
-        profile,
-        logbook: state.logbooks[studentId],
-      }))
+  async function getStudentsForCompany() {
+    return apiRequest('/company/students')
   }
 
-  function getPendingDaySubmissionsForCompany(companyId) {
-    return getStudentsForCompany(companyId).flatMap((student) => {
-      const pending = []
-      student.logbook?.months.forEach((month) => {
-        month.weeks.forEach((week) => {
-          week.days.forEach((day) => {
-            if (day.submitted && !day.approved) {
-              pending.push({ ...student, month, week, day })
-            }
-          })
-        })
-      })
-      return pending
+  async function getPendingDaySubmissionsForCompany() {
+    return apiRequest('/company/submissions/pending')
+  }
+
+  async function approveDay(studentId, monthId, weekId, dayId) {
+    return apiRequest(`/company/logbook/${studentId}/${monthId}/${weekId}/${dayId}/approve`, {
+      method: 'PATCH',
     })
   }
 
-  function submitDay(studentId, monthId, weekId, dayId) {
-    setState((s) => {
-      const lb = s.logbooks[studentId]
-      if (!lb) return s
-      const months = lb.months.map((m) => {
-        if (m.id !== monthId || m.locked) return m
-        return {
-          ...m,
-          weeks: m.weeks.map((w) => {
-            if (w.id !== weekId) return w
-            return {
-              ...w,
-              days: w.days.map((d) =>
-                d.id === dayId && d.filled && !d.approved
-                  ? { ...d, submitted: true, submittedAt: new Date().toISOString() }
-                  : d
-              ),
-            }
-          }),
-        }
-      })
-      return { ...s, logbooks: { ...s.logbooks, [studentId]: { ...lb, months } } }
+  // ---- Logbook (student's own) ----
+  async function getLogbook() {
+    try {
+      return await apiRequest('/student/logbook')
+    } catch (error) {
+      if (error.status === 404) return null
+      throw error
+    }
+  }
+
+  async function updateDayEntry(monthId, weekId, dayId, text) {
+    return apiRequest(`/student/logbook/${monthId}/${weekId}/${dayId}`, {
+      method: 'PATCH',
+      body: { text },
     })
   }
 
-  function approveDay(companyId, studentId, monthId, weekId, dayId) {
-    setState((s) => {
-      const company = (s.companies || []).find((c) => c.id === companyId)
-      const profile = s.studentProfiles[studentId]
-      if (!company || !profile || !sameCompany(profile.orgName, company.name)) return s
+  async function submitDay(monthId, weekId, dayId) {
+    return apiRequest(`/student/logbook/${monthId}/${weekId}/${dayId}/submit`, { method: 'POST' })
+  }
 
-      const lb = s.logbooks[studentId]
-      if (!lb) return s
-
-      const months = lb.months.map((m) => {
-        if (m.id !== monthId || m.locked) return m
-        return {
-          ...m,
-          weeks: m.weeks.map((w) => {
-            if (w.id !== weekId) return w
-            const days = w.days.map((d) =>
-              d.id === dayId && d.submitted && !d.approved
-                ? {
-                    ...d,
-                    approved: true,
-                    approvedAt: new Date().toISOString(),
-                    approvedBy: companyId,
-                  }
-                : d
-            )
-            const weekDone = days.length > 0 && days.every((d) => d.approved)
-            return { ...w, days, weekDone }
-          }),
-        }
-      })
-      return { ...s, logbooks: { ...s.logbooks, [studentId]: { ...lb, months } } }
+  async function submitMonth(monthId, secondPartyEmail) {
+    return apiRequest(`/student/logbook/${monthId}/submit`, {
+      method: 'POST',
+      body: { secondPartyEmail },
     })
   }
 
-  // ---- Logbook ----
-  function getLogbook(studentId) {
-    return state.logbooks[studentId] || null
+  async function sendCompanyRequest(companyId, staffName, staffPhone) {
+    return apiRequest('/student/company-request', { method: 'POST', body: { companyId, staffName, staffPhone } })
   }
 
-  function updateDayEntry(studentId, monthId, weekId, dayId, text) {
-    setState((s) => {
-      const lb = s.logbooks[studentId]
-      if (!lb) return s
-      const months = lb.months.map((m) => {
-        if (m.id !== monthId || m.locked) return m
-        const weeks = m.weeks.map((w) => {
-          if (w.id !== weekId) return w
-          const days = w.days.map((d) =>
-            d.id === dayId && !d.submitted && !d.approved
-              ? { ...d, text, filled: text.trim().length > 0 }
-              : d
-          )
-          return { ...w, days }
-        })
-        return { ...m, weeks }
-      })
-      return { ...s, logbooks: { ...s.logbooks, [studentId]: { ...lb, months } } }
+  async function getCompanyRequestForStudent() {
+    try {
+      return await apiRequest('/student/company-request')
+    } catch (error) {
+      if (error.status === 404) return null
+      throw error
+    }
+  }
+
+  async function getPendingCompanyRequestsForCompany() {
+    return apiRequest('/company/requests/pending')
+  }
+
+  async function respondCompanyRequest(requestId, accept) {
+    return apiRequest(`/company/requests/${requestId}`, {
+      method: 'PATCH',
+      body: { decision: accept ? 'accepted' : 'declined' },
     })
   }
 
-  function markWeekDone(studentId, monthId, weekId) {
-    // Kept for backwards compatibility with older UI/state.
-    setState((s) => {
-      const lb = s.logbooks[studentId]
-      if (!lb) return s
-      const months = lb.months.map((m) => {
-        if (m.id !== monthId || m.locked) return m
-        const weeks = m.weeks.map((w) => {
-          if (w.id !== weekId) return w
-          const allApproved = w.days.length > 0 && w.days.every((d) => d.approved)
-          return allApproved ? { ...w, weekDone: true } : w
-        })
-        return { ...m, weeks }
-      })
-      return { ...s, logbooks: { ...s.logbooks, [studentId]: { ...lb, months } } }
-    })
+  async function deleteAccount() {
+    await apiRequest('/auth/me', { method: 'DELETE' })
+    setToken(null)
+    setCurrentUser(null)
   }
 
-  function submitMonth(studentId, monthId, secondPartyEmail) {
-    setState((s) => {
-      const lb = s.logbooks[studentId]
-      if (!lb) return s
-      const target = lb.months.find((m) => m.id === monthId)
-      const ready = target?.weeks.every((w) => w.days.length > 0 && w.days.every((d) => d.approved))
-      if (!ready) return s
-      const months = lb.months.map((m) =>
-        m.id === monthId
-          ? {
-              ...m,
-              submitted: true,
-              locked: true,
-              secondPartyEmail: secondPartyEmail || null,
-              submittedAt: new Date().toISOString(),
-            }
-          : m
-      )
-      return { ...s, logbooks: { ...s.logbooks, [studentId]: { ...lb, months } } }
+  async function setWeekMark(studentId, monthId, weekId, mark) {
+    return apiRequest(`/supervisor/students/${studentId}/logbook/${monthId}/${weekId}/mark`, {
+      method: 'PATCH',
+      body: { mark },
     })
   }
 
   const value = {
-    state,
-    currentUser,
-    signup,
-    login,
-    logout,
-    saveStudentProfile,
-    getStudentProfile,
-    sendJoinRequest,
-    respondJoinRequest,
-    getJoinRequestForStudent,
-    getSupervisorForStudent,
-    getStudentsForSupervisor,
-    getPendingRequestsForSupervisor,
-    suggestSupervisors,
-    getStudentsForCompany,
-    getPendingDaySubmissionsForCompany,
-    submitDay,
-    approveDay,
-    getLogbook,
-    updateDayEntry,
-    markWeekDone,
-    submitMonth,
-  }
+  currentUser,
+  authLoading,
+  signup,
+  login,
+  logout,
+  saveStudentProfile,
+  getStudentProfile,
+  sendJoinRequest,
+  respondJoinRequest,
+  getJoinRequestForStudent,
+  getSupervisorForStudent,
+  getStudentsForSupervisor,
+  getPendingRequestsForSupervisor,
+  suggestSupervisors,
+  listCompanies,
+  getStudentsForCompany,
+  getPendingDaySubmissionsForCompany,
+  submitDay,
+  approveDay,
+  getLogbook,
+  updateDayEntry,
+  submitMonth,
+  sendCompanyRequest,
+  getCompanyRequestForStudent,
+  getPendingCompanyRequestsForCompany,
+  respondCompanyRequest,
+  deleteAccount,
+  setWeekMark
+}
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
